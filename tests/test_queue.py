@@ -79,32 +79,41 @@ def test_reliable():
         q = ReliableQueue(r, 'test_reliable')
         item = q.pop()
         assert item is None
+
         q.push('hi')
         item = q.pop()
         assert item == ('hi', None)
+        q.complete(item[0])
         item = q.pop()
-        assert item[0] == 'hi'
-        assert item[1] <= time.time()
-        # test timeout
-        max_time = 5  # secs
-        timed_out = False
-        i = 0
-        while True and i < 1000:
-            item = q.pop()
-            if item is None:
-                break
-            if item[1] is not None:
-                if int(item[1]) >= int(time.time()) + max_time:
-                    q.remove(item)
-                    timeout = True
-                    break
-            i += 1
-            time.sleep(0.1)
+        assert len(q) == 0
 
-        assert timeout == True
-        #assert 1 == 2
-        # q.push('one')
-        # assert q.pop() == 'one'
+        item = q.pop()
+        assert item is None
+
+
+        q.push('hi')
+        assert len(q) == 1
+
+        msg1, _ = q.pop()
+        assert len(q) == 1
+        msg2, ts = q.pop()
+        assert msg1 == msg2
+        time.sleep(1)
+        assert len(q) == 1
+
+        if time.time() >= ts + 0.5:
+            p = q.reprocess(msg2, ts)
+            assert len(q) == 1
+            assert p == msg2
+            assert len(q.items()) == 1
+            q.complete(p)
+            assert len(q) == 1
+            assert q.pop() is None
+            assert len(q) == 0
+        # time.sleep(0.5)
+        # if time.time() >= ts + 1:
+        #     p = q.reprocess(msg)
+        # print q.items()
+
     finally:
-        pass
-        # r.delete('test_reliable')
+        r.delete('test_reliable')

@@ -178,8 +178,23 @@ class ReliableQueue(BaseQueue):
         end
         return ret
         """
+        redo_script = """
+        redis.call('lrem', KEYS[1], 0, ARGV[1])
+        redis.call('srem',  KEYS[1] .. ':completed_set', ARGV[1])
+        local l, msg, ts = string.match(ARGV[1], '(%d+):(.+):(%d*)')
+        local nmsg = l .. ':' .. msg .. ':' .. ARGV[2]
+        redis.call('lpush', KEYS[1], nmsg)
+        return msg
+        """
         self.rpop = self._redis.register_script(rpop_script)
+        self.redo = self._redis.register_script(redo_script)
         self.completed_set = '%s:completed_set' % self.name
+
+    def __len__(self):
+        return self._redis.llen(self.name)
+
+    def items(self):
+        return self._redis.lrange(self.name, 0, -1)
 
     def push(self, msg):
         """
@@ -234,5 +249,12 @@ class ReliableQueue(BaseQueue):
         """
         ts = str(item[1]) if item[1] else ''
         s = '%d:%s:%s' % (len(item[0]), item[0], ts)
-        self._redis.lrem(self.name, s)
-        self._redis.srem(self.completed_set, item[0])
+        with self._redis.pipeline() as pipe:
+            pipe.lrem(self.name, 0, s)
+            pipe.srem(self.completed_set, item[0])
+            pipe.execute()
+
+    def reprocess(self, msg, cts):
+        ts = int(time.time())
+        msg = str(len(msg)) + ':' + msg + ':' + str(cts)
+        return self.redo(keys=[self.name], client=self._redis, args=[msg, ts])
